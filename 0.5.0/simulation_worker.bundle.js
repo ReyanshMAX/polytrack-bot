@@ -1,3 +1,187 @@
+
+// for data speed optimization between threads
+function flattenState(state, startFrame) {
+  const array = [];
+
+  array.push(startFrame); // startFrame
+
+  const boolToNum = (b) => (b ? 1 : 0);
+
+  array.push(boolToNum(state.brakeLightEnabled));
+
+  // controls
+  for (let key of ['up', 'right', 'down', 'left', 'reset']) {
+    array.push(boolToNum(state.controls[key]));
+  }
+
+  // finishFrames: store -1 if null, else the value
+  array.push(state.finishFrames === null ? -1 : state.finishFrames);
+
+  // main properties
+  array.push(state.frames);
+  array.push(boolToNum(state.hasCheckpointToRespawnAt));
+  array.push(boolToNum(state.hasStarted));
+  array.push(state.id);
+  array.push(state.nextCheckpointIndex);
+
+  // position {x,y,z}
+  array.push(state.position.x, state.position.y, state.position.z);
+
+  // quaternion {x,y,z,w}
+  array.push(state.quaternion.x, state.quaternion.y, state.quaternion.z, state.quaternion.w);
+
+  // speed
+  array.push(state.speedKmh);
+
+  // wheelDeltaRotation (4)
+  state.wheelDeltaRotation.forEach(v => array.push(v));
+
+  // wheelInContact (4)
+  state.wheelInContact.forEach(v => array.push(boolToNum(v)));
+
+  // wheelPosition (4)
+  state.wheelPosition.forEach(w => {
+    array.push(w.x, w.y, w.z);
+  });
+
+  // wheelQuaternion (4)
+  state.wheelQuaternion.forEach(w => {
+    array.push(w.x, w.y, w.z, w.w);
+  });
+
+  // wheelRotation (4)
+  state.wheelRotation.forEach(v => array.push(v));
+
+  // wheelSkidInfo (4)
+  state.wheelSkidInfo.forEach(v => array.push(v));
+
+  // wheelSuspensionLength (4)
+  state.wheelSuspensionLength.forEach(v => array.push(v));
+
+  // wheelSuspensionVelocity (4)
+  state.wheelSuspensionVelocity.forEach(v => array.push(v));
+
+  // collisionImpulses length
+  array.push(state.collisionImpulses.length);
+  // collisionImpulses data
+  state.collisionImpulses.forEach(v => array.push(v));
+
+  return new Float32Array(array);
+}
+
+function reconstructStates(buffer) {
+  const state = {};
+  let index = 0;
+
+  const startFrame = buffer[index++];
+
+  const getNext = (count) => {
+    const slice = Array.from(buffer.slice(index, index + count));
+    index += count;
+    return slice;
+  };
+
+  const numToBool = (n) => n >= 0.5;
+
+  // boolean properties
+  state.brakeLightEnabled = numToBool(buffer[index++]);
+
+  // controls
+  state.controls = {
+    up: numToBool(buffer[index++]),
+    right: numToBool(buffer[index++]),
+    down: numToBool(buffer[index++]),
+    left: numToBool(buffer[index++]),
+    reset: numToBool(buffer[index++]),
+  };
+
+  // finishFrames (-1 means null)
+  const finishFramesValue = buffer[index++];
+  state.finishFrames = finishFramesValue === -1 ? null : finishFramesValue;
+
+  // main properties
+  state.frames = buffer[index++];
+  state.hasCheckpointToRespawnAt = numToBool(buffer[index++]);
+  state.hasStarted = numToBool(buffer[index++]);
+  state.id = buffer[index++];
+  state.nextCheckpointIndex = buffer[index++];
+
+  // position
+  state.position = {
+    x: buffer[index++],
+    y: buffer[index++],
+    z: buffer[index++],
+  };
+
+  // quaternion
+  state.quaternion = {
+    x: buffer[index++],
+    y: buffer[index++],
+    z: buffer[index++],
+    w: buffer[index++],
+  };
+
+  // speed
+  state.speedKmh = buffer[index++];
+
+  // wheelDeltaRotation (4)
+  state.wheelDeltaRotation = getNext(4);
+
+  // wheelInContact (4)
+  state.wheelInContact = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelInContact.push(numToBool(buffer[index++]));
+  }
+
+  // wheelPosition (4)
+  state.wheelPosition = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelPosition.push({
+      x: buffer[index++],
+      y: buffer[index++],
+      z: buffer[index++],
+    });
+  }
+
+  // wheelQuaternion (4)
+  state.wheelQuaternion = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelQuaternion.push({
+      x: buffer[index++],
+      y: buffer[index++],
+      z: buffer[index++],
+      w: buffer[index++],
+    });
+  }
+
+  // wheelRotation (4)
+  state.wheelRotation = getNext(4);
+
+  // wheelSkidInfo (4)
+  state.wheelSkidInfo = getNext(4);
+
+  // wheelSuspensionLength (4)
+  state.wheelSuspensionLength = getNext(4);
+
+  // wheelSuspensionVelocity (4)
+  state.wheelSuspensionVelocity = getNext(4);
+
+  // collisionImpulses
+  const collisionImpulsesCount = buffer[index++];
+  state.collisionImpulses = [];
+  for (let i = 0; i < collisionImpulsesCount; i++) {
+    state.collisionImpulses.push(buffer[index++]);
+  }
+
+  return {
+    startFrame: startFrame,
+    stateEnd: state
+  }
+}
+
+
+
+
 ( () => {
     var e = {
         1312: (e, t, n) => {
@@ -28965,14 +29149,34 @@
                     //console.log(t.length);
                     //console.log(t);
                     //console.log(newT);
-                    postMessage({
+
+
+                    // usual length is 74 (cus of 2 protocol nums), but if there are collision impulses the length can extend at the back infinitely
+
+                    const lastStateBuffer = flattenState(t[t.length - 1], t[0].frames);
+                    //if (lastStateBuffer.length > 74) {
+                        //console.log(t[t.length - 1]);
+                    
+                        //console.log(lastStateBuffer);
+
+                        //const lastState = reconstructStates(lastStateBuffer);
+                        //console.log(lastState);
+                    //}
+
+                    
+                    postMessage( // beaming buffer memory
+                        lastStateBuffer.buffer, // directly send buffer
+                        [lastStateBuffer.buffer] // transferable array, move it over threads
+                    );
+                    
+                    /*postMessage({
                         messageType: g_.UpdateResult,
                         carStates: {
                             //stateStart: t[0],
                             startFrame: t[0].frames,
                             stateEnd: t[t.length - 1]
                         }
-                    });
+                    });*/
                 }
                 requestAnimationFrame(l)
             }

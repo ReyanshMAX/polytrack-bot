@@ -1,5 +1,5 @@
 const extraReplays = [
-    {
+    /*{
         c: "eNpjZAABcQaGCCaGCYwMKQwgBGcA0R4mEHmCAUoCkQ5MFiII4ULYfDD1EBSBxOZgR7AhikUYGL4wIpQByRNIVp-AKQaaj2YjRD0QAADbXhps"
     },
     {
@@ -10,10 +10,144 @@ const extraReplays = [
     },
     {
         c: "eNrjZgCBEwwMKQwMe5hAJIRtwgEivzCCSEkkNTqMDBMYocogIhAyBdUQCIKrhJA6YC4bA0MEE4gLsQKCJMCCQPVfGNHN1EG1Dlk2BUkErhIIANcVIQQ"
+    },*/
+    { // like 50
+        c: "eNpjYwCBEwwMKQwMd1hB5BI2BnYGBh1GEBsiHsEEImdwMDCBFacwQAEA7R0Gqg"
+    },
+    { // 230
+        c: "eNpjYQCBEwwMKQwMO7gZ2GFciEgEE4g04QAJMsEEgQAAszQGFw"
+    },
+    { // 380
+        c: "eNpjYQCBFDCS4WFgh7GB6AQDwx1WEGMDCwMcAAB1MATp"
+    },
+    { // 530
+        c: "eNpjYwCBCCaGFAYGEVYoyQkWZGVgYGRgiGMACZ5gYHBgg8oCARMDwwRGEBcIAJJtBK4"
+    },
+    { // 711
+        c: "eNpjYwCBFAaGEwwMOewgRgUrAztYECgygRFEAkUg4kwwlRAAAOOeBzs"
+    },
+    { // 1200
+        c: "eNpjYgCBBh4GTgaGEwwMKTAEYU9gBJE57CA1TDApIAAArTUF6g"
     }
 ];
 const AI_carColor = "150d07ffffff131313666666"; // black-ish
 const replayDuration = 5000; // frame count, 5s
+
+
+
+
+
+// for data speed optimization between threads
+function reconstructStates(buffer) {
+  const state = {};
+  let index = 0;
+
+  const startFrame = buffer[index++];
+
+  const getNext = (count) => {
+    const slice = Array.from(buffer.slice(index, index + count));
+    index += count;
+    return slice;
+  };
+
+  const numToBool = (n) => n >= 0.5;
+
+  // boolean properties
+  state.brakeLightEnabled = numToBool(buffer[index++]);
+
+  // controls
+  state.controls = {
+    up: numToBool(buffer[index++]),
+    right: numToBool(buffer[index++]),
+    down: numToBool(buffer[index++]),
+    left: numToBool(buffer[index++]),
+    reset: numToBool(buffer[index++]),
+  };
+
+  // finishFrames (-1 means null)
+  const finishFramesValue = buffer[index++];
+  state.finishFrames = finishFramesValue === -1 ? null : finishFramesValue;
+
+  // main properties
+  state.frames = buffer[index++];
+  state.hasCheckpointToRespawnAt = numToBool(buffer[index++]);
+  state.hasStarted = numToBool(buffer[index++]);
+  state.id = buffer[index++];
+  state.nextCheckpointIndex = buffer[index++];
+
+  // position
+  state.position = {
+    x: buffer[index++],
+    y: buffer[index++],
+    z: buffer[index++],
+  };
+
+  // quaternion
+  state.quaternion = {
+    x: buffer[index++],
+    y: buffer[index++],
+    z: buffer[index++],
+    w: buffer[index++],
+  };
+
+  // speed
+  state.speedKmh = buffer[index++];
+
+  // wheelDeltaRotation (4)
+  state.wheelDeltaRotation = getNext(4);
+
+  // wheelInContact (4)
+  state.wheelInContact = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelInContact.push(numToBool(buffer[index++]));
+  }
+
+  // wheelPosition (4)
+  state.wheelPosition = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelPosition.push({
+      x: buffer[index++],
+      y: buffer[index++],
+      z: buffer[index++],
+    });
+  }
+
+  // wheelQuaternion (4)
+  state.wheelQuaternion = [];
+  for (let i = 0; i < 4; i++) {
+    state.wheelQuaternion.push({
+      x: buffer[index++],
+      y: buffer[index++],
+      z: buffer[index++],
+      w: buffer[index++],
+    });
+  }
+
+  // wheelRotation (4)
+  state.wheelRotation = getNext(4);
+
+  // wheelSkidInfo (4)
+  state.wheelSkidInfo = getNext(4);
+
+  // wheelSuspensionLength (4)
+  state.wheelSuspensionLength = getNext(4);
+
+  // wheelSuspensionVelocity (4)
+  state.wheelSuspensionVelocity = getNext(4);
+
+  // collisionImpulses
+  const collisionImpulsesCount = buffer[index++];
+  state.collisionImpulses = [];
+  for (let i = 0; i < collisionImpulsesCount; i++) {
+    state.collisionImpulses.push(buffer[index++]);
+  }
+
+  return {
+    startFrame: startFrame,
+    stateEnd: state
+  }
+}
+
 
 
 ( () => {
@@ -43469,6 +43603,35 @@ const replayDuration = 5000; // frame count, 5s
                             for (let frame = firstFrame; frame <= lastFrame; frame++) { // add last frame too
                                 const newFrame = { ...stateEnd };
                                 newFrame.frames = frame;
+                                newT.push(newFrame);
+                            }
+                            newT.forEach((e) => {
+                                if (e.id == l) {
+                                    a(e);
+                                }
+                            });
+                        }
+                    } else {
+                        if (e.data instanceof ArrayBuffer) {
+                            const buffer = new Float32Array(e.data);
+                            //console.log(buffer);
+                            const { startFrame, stateEnd } = reconstructStates(buffer);
+                            //console.log(startFrame, stateEnd);
+
+                            const finishFrames = stateEnd.finishFrames;
+
+                            let newT = [];
+                            const lastFrame = stateEnd.frames;
+                            for (let frame = startFrame; frame <= lastFrame; frame++) { // add last frame too
+                                const newFrame = { ...stateEnd };
+                                newFrame.frames = frame;
+
+                                if (finishFrames !== null) {
+                                    if (frame < finishFrames) { // if not finished yet on this state,
+                                        newFrame.finishFrames = null; // remove this finish flag for that step
+                                    }
+                                }
+                                
                                 newT.push(newFrame);
                             }
                             newT.forEach((e) => {
