@@ -1,15 +1,26 @@
 <!DOCTYPE html>
 
 <html>
-	<head>
-		<link rel="manifest" href="manifest.json" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
-	</head>
-	<body>
-		<canvas id="screen"></canvas>
-		<div id="ui"></div>
-		<div id="transition-layer"></div>
 
-		<script type="module" src="main.bundle.js" defer></script>
-	</body>
+<head>
+	<link rel="manifest" href="manifest.json" />
+	<meta name="viewport"
+		content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+</head>
+
+<body>
+	<canvas id="screen"></canvas>
+	<div id="ui"></div>
+	<div id="transition-layer"></div>
+	<div id="modelName"></div>
+	<div id="iteration_count"></div>
+	<div id="bestAttempt"></div>
+	<div id="graph_rewarditerations"></div>
+
+
+	<script src="ai_bridge.js"></script>
+	<script type="module" src="main.bundle.js"></script>
+	<script type="module" src="ai_env.js"></script>
+</body>
+
 </html>
