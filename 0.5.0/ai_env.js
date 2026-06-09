@@ -97,11 +97,11 @@ training_worker.onmessage = (e) => {
         }
 
         (async () => {
-            const carCount = 100;
-            const delayPerCar = 100;
+            const carCount = 5;
+            const delayPerCar = 200;
             for (let i = 0; i < carCount; i++) {
                 createAI_car(i, trackData);
-                await new Promise(r => setTimeout(r, delayPerCar)); // 100ms after each other
+                await new Promise(r => setTimeout(r, delayPerCar));
             }
         })();
 
@@ -593,20 +593,22 @@ function getAgentState(states, carID) {
     //console.log(lastSimState);
     // collisionImpulses maybe?
 
-    const carPos = lastSimState.position; //{ x: lastSimState.position.x, y: lastSimState.position.y, z: lastSimState.position.z };
-    const wheelsContactPos = [ // if wheel is making contact, return the position. Else if not touching, then return the carPos as when making relative it will just give 0
-        lastSimState.wheelContact[0] ? lastSimState.wheelContact[0].position : carPos,
-        lastSimState.wheelContact[1] ? lastSimState.wheelContact[1].position : carPos,
-        lastSimState.wheelContact[2] ? lastSimState.wheelContact[2].position : carPos,
-        lastSimState.wheelContact[3] ? lastSimState.wheelContact[3].position : carPos,
+    const carPos = lastSimState.position;
+    const wc = lastSimState.wheelContact || [];
+    const wheelsContactPos = [
+        wc[0] ? wc[0].position : carPos,
+        wc[1] ? wc[1].position : carPos,
+        wc[2] ? wc[2].position : carPos,
+        wc[3] ? wc[3].position : carPos,
     ];
-    const wheelsNormalVector = [ // If wheel is making contact, return normal vector. Else returns 0 0 0
-        lastSimState.wheelContact[0] ? lastSimState.wheelContact[0].normal : { x: 0, y: 0, z: 0 },
-        lastSimState.wheelContact[1] ? lastSimState.wheelContact[1].normal : { x: 0, y: 0, z: 0 },
-        lastSimState.wheelContact[2] ? lastSimState.wheelContact[2].normal : { x: 0, y: 0, z: 0 },
-        lastSimState.wheelContact[3] ? lastSimState.wheelContact[3].normal : { x: 0, y: 0, z: 0 },
+    const wheelsNormalVector = [
+        wc[0] ? wc[0].normal : { x: 0, y: 0, z: 0 },
+        wc[1] ? wc[1].normal : { x: 0, y: 0, z: 0 },
+        wc[2] ? wc[2].normal : { x: 0, y: 0, z: 0 },
+        wc[3] ? wc[3].normal : { x: 0, y: 0, z: 0 },
     ];
-    const acceleration = secondLastSimState.speedKmh - lastSimState.speedKmh; // compare the speed of 2 frames ago vs the speed of last frame. There must be 2 frames though!
+    const prevState = secondLastSimState || lastSimState; // fallback when batch has only 1 state
+    const acceleration = prevState.speedKmh - lastSimState.speedKmh;
 
     // Progress. Path points are of WR and start at t:100 and end at t:22000. Start of AI is t0, so it will always be some distance away from first point
     const nearestPoint = treeNearest(carPos, 1);
@@ -645,9 +647,9 @@ function getAgentState(states, carID) {
         carPos.y,
         carPos.z,
         // Delta position, which is a velocity vector
-        secondLastSimState.position.x - carPos.x,
-        secondLastSimState.position.y - carPos.y,
-        secondLastSimState.position.z - carPos.z,
+        prevState.position.x - carPos.x,
+        prevState.position.y - carPos.y,
+        prevState.position.z - carPos.z,
 
         // Orientation and rotation
         lastSimState.quaternion.x,
