@@ -1,3 +1,9 @@
+if (new URLSearchParams(location.search).get('reset') === '1') {
+    Object.keys(localStorage).filter(k => k.startsWith('tensorflowjs')).forEach(k => localStorage.removeItem(k));
+    ['model-1-policyNetwork','model-1-valueNetwork','AI_PPO_iterationCount..model-1'].forEach(k => localStorage.removeItem(k));
+    location.replace(location.pathname); // reload without ?reset
+}
+
 const training_worker = new Worker('training_worker.js');
 
 
@@ -48,21 +54,26 @@ let iterationCount = 0;
 
 const showStats = true;
 let modelName_el, iteration_count_el, bestAttempt_el;
-document.addEventListener("DOMContentLoaded", (event) => {
+function _initStatEls() {
     modelName_el = document.getElementById("modelName");
     iteration_count_el = document.getElementById("iteration_count");
     bestAttempt_el = document.getElementById("bestAttempt");
-});
+}
+if (document.readyState === 'loading') {
+    document.addEventListener("DOMContentLoaded", _initStatEls);
+} else {
+    _initStatEls();
+}
 
 const trainSpeedInfo = false;
 
 
 let iterationData = {}; // for graph stats
 if (calledSharedEventListeners.has("onAmmoLoaded")) { // Ammo already loaded, just run plotly already
-    loadScript("/lib/plotly-3.2.0.min.js", () => { console.log("Plotly loaded! Ammo/math already loaded"); });
+    loadScript("/0.5.0/lib/plotly-3.2.0.min.js", () => { console.log("Plotly loaded! Ammo/math already loaded"); });
 } else { // if ai_environment.js has loaded but ammo not done yet somehow
     addSharedEventListener("onAmmoLoaded", () => { // wait for math
-        loadScript("/lib/plotly-3.2.0.min.js", () => { console.log("Plotly loaded! Waited for onAmmoLoaded"); });
+        loadScript("/0.5.0/lib/plotly-3.2.0.min.js", () => { console.log("Plotly loaded! Waited for onAmmoLoaded"); });
     });
 }
 
@@ -97,10 +108,10 @@ training_worker.onmessage = (e) => {
         }
 
         (async () => {
-            const carCount = 5;
+            const carCount = 1; // >1 OOMs: each CreateCar(trackData) builds a BVH collision mesh; Init already built one, so N cars = N+1 meshes total. Worker-per-car needed for parallelism.
             const delayPerCar = 200;
             for (let i = 0; i < carCount; i++) {
-                createAI_car(i, trackData);
+                createAI_car(i);
                 await new Promise(r => setTimeout(r, delayPerCar));
             }
         })();
@@ -114,7 +125,19 @@ training_worker.onmessage = (e) => {
         //console.log("Outputs:", outputs);
 
         // apply outputs to car
-        const { up, down, left, right } = getControlsFromOutput(outputs);
+        let { up, down, left, right } = getControlsFromOutput(outputs);
+        if (Math.random() < 0.002) console.log(`controls sample car${carID}: up=${up} down=${down} left=${left} right=${right} | raw steering=${outputs.steering} throttle=${outputs.throttle} brake=${outputs.brake}`);
+
+        // ε-greedy exploration: override with random action 40% of the time so the policy
+        // can't collapse to "sit still" — car needs to experience forward motion to get gradient.
+        const EPSILON = Math.max(0.05, 0.4 - iterationCount * 0.0001);
+        if (Math.random() < EPSILON) {
+            up    = Math.random() < 0.8; // throttle bias: car needs to learn to move
+            down  = !up && Math.random() < 0.2;
+            left  = Math.random() < 0.3;
+            right = !left && Math.random() < 0.3;
+        }
+
         const newControls = {
             up: up, // accelerate
             down: down, // brake
@@ -138,12 +161,12 @@ training_worker.onmessage = (e) => {
         const carID = data.carID;
         const trainingTime = (performance.now() - trainingTimePerCar[carID]) / 1000;
         delete trainingTimePerCar[carID];
-        if (trainSpeedInfo) console.log("Training car " + carID + " done in " + trainingTime.toFixed(3) + "s");
+        console.log(`ep${iterationCount} reward=${data.totalReward.toFixed(4)} progressIndex=${data.progressIndex}`);
         // Now save the model
         training_worker.postMessage({ type: 'save', data: { name: modelName } }); // this saves both the policyNetwork and the valueNetwork
         // Now create a new car. Experience has been deleted by training_worker
         setTimeout(() => {
-            createAI_car(carID, trackData); // create a car with the exact same ID. As our AI_endOfEpisode_handler has already deleted the car
+            createAI_car(carID);
         }, 0);
 
         iterationCount++;
@@ -159,7 +182,7 @@ training_worker.onmessage = (e) => {
             reward: data.totalReward,
             progressPercentage: progressPercentage
         });
-        if (showStats && iterationCount % 100 == 0) {
+        if (showStats && iterationCount % 100 == 0 && typeof Plotly !== 'undefined') {
             //console.log(iterationData);
 
             let graphData = [];
@@ -235,7 +258,7 @@ training_worker.onmessage = (e) => {
 
             var graphData = [trace1, trace2];*/
 
-            Plotly.newPlot('graph_rewarditerations', graphData);
+            requestAnimationFrame(() => Plotly.react('graph_rewarditerations', graphData));
         }
     } else if (type == "delete_model_done") {
         iterationCount = 0;
@@ -347,7 +370,7 @@ addSharedEventListener("onWorkerMessage", onWorkerMessage);
 
 
 
-function createAI_car(carID, trackData) {
+function createAI_car(carID) {
     // Start our timer :D
     inferenceTimePerCar[carID] = performance.now();
     if (trainSpeedInfo) console.log("Starting car " + carID);
@@ -360,7 +383,6 @@ function createAI_car(carID, trackData) {
             y: 0,
             z: 70
         },
-        // trackdata should be e.toSaveString()
         trackData: trackData,
         carId: carID,
         carRecording: null, // No pre-recording, this will let us control and then record it
@@ -518,8 +540,11 @@ function calculateReward(states) {
 
     // Actually, I think they mean the full distance from start to current point: 'rollout_results["meters_advanced_along_centerline"].append(distance_since_track_begin)'
     // This means it exponentially gets higher reward the further it goes, massively rewarding long distance driving
-    const distanceSinceTrackBegin = progressIndex * 0.5; // points are about 0.5m-0.6m from each other
-    batchReward = distanceSinceTrackBegin * 0.01; // from linesight config
+    // Use actual average point spacing computed from bootstrap data (points[] may be sparse).
+    // Fallback to 0.5 if bootstrap hasn't populated points yet.
+    const avgPointSpacing = points.length > 1 ? window._trackTotalLength / points.length : 0.5;
+    const distanceSinceTrackBegin = progressIndex * avgPointSpacing;
+    batchReward = distanceSinceTrackBegin * 0.1; // from linesight config
     //const actualDistance = getDistanceSinceTrackBegin(progressIndex); // Tiny difference in accurary (25.5 -> 26.03) but it's not worth it as '* 0.5' is way faster!
 
     //batchReward += lastState.speedKmh * 0.1; // small reward for speed too. 200kmh = 20 extra reward

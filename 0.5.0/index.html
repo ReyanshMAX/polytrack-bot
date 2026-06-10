@@ -6,6 +6,27 @@
 	<link rel="manifest" href="manifest.json" />
 	<meta name="viewport"
 		content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+	<style>
+		body { margin: 0; overflow: hidden; background: #111; }
+		/* Game canvas is required to boot (trackParts capture), but we don't need to see it */
+		#screen, #ui, #transition-layer { display: none; }
+		#modelName, #iteration_count, #bestAttempt {
+			position: fixed; left: 10px;
+			color: white; font: bold 13px monospace;
+			text-shadow: 0 0 4px black;
+			z-index: 999; pointer-events: none;
+		}
+		#modelName       { top: 10px; }
+		#iteration_count { top: 28px; }
+		#bestAttempt     { top: 46px; }
+		#graph_rewarditerations {
+			position: fixed; bottom: 0; right: 0;
+			width: 420px; height: 260px;
+			z-index: 999; pointer-events: none;
+			background: rgba(0,0,0,0.55);
+			border-top-left-radius: 6px;
+		}
+	</style>
 </head>
 
 <body>

@@ -172,7 +172,7 @@ const CAR_COLLISION_SHAPE_VERTICES = [
 // === AI SIM WORKER SETUP ===
 const BOOTSTRAP_REPLAY = "eNpjYgCBBh4GTgaGEwwMKTAEYU9gBJE57CA1TDApIAAArTUF6g";
 const BOOTSTRAP_CAR_ID = -999;
-const BOOTSTRAP_FRAMES = 1200;
+const BOOTSTRAP_FRAMES = 8000; // WR is ~2500 frames; 8000 gives full coverage + buffer for slow-start
 const STATES_PER_BATCH = 100;
 const EXPIRY_THRESHOLD = 5;
 
@@ -245,11 +245,21 @@ function _finalizeBootstrap() {
     // Populate global points array (same reference ai_env.js holds)
     for (let i = 0; i < sampled.length; i++) window.points.push(sampled[i]);
 
+    // Compute total arc length so reward scaling uses real meters regardless of point density.
+    let totalLen = 0;
+    for (let i = 1; i < sampled.length; i++) {
+        const dx = sampled[i].x - sampled[i-1].x;
+        const dy = sampled[i].y - sampled[i-1].y;
+        const dz = sampled[i].z - sampled[i-1].z;
+        totalLen += Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    window._trackTotalLength = totalLen;
+
     // Build KD-tree
     const items = sampled.map(function (pt, idx) { return { pt: pt, idx: idx }; });
     _kdRoot = _buildKD(items, 0);
 
-    console.log('AI bridge: bootstrap done, path points:', window.points.length);
+    console.log('AI bridge: bootstrap done, path points:', window.points.length, 'track length ~' + totalLen.toFixed(0) + 'm');
 
     // The bootstrap worker has created track physics bodies in Ammo.js that are never freed
     // when DeleteCar runs. Terminate it entirely and start a fresh worker so the WASM heap
